@@ -549,7 +549,7 @@ details.tn summary{cursor:pointer; font-weight:600; font-size:13px; color:var(--
         <div class="action-col">
           <button class="btn" id="btnScan">1 · Scan every split</button>
           <button class="btn" id="btnGrow" disabled>2 · Grow the tree</button>
-          <button class="btn" id="btnApply" disabled>3 · Update predictions (η = 0.3)</button>
+          <button class="btn" id="btnApply" disabled>3 · Update predictions (η = <span id="etaLbl">0.3</span>)</button>
           <button class="btn ghost" id="btnNext" disabled>Next round →</button>
           <button class="btn ghost" id="btnFF">Fast-forward ⏩</button>
           <button class="btn ghost" id="btnReset">↺ Reset</button>
@@ -557,6 +557,13 @@ details.tn summary{cursor:pointer; font-weight:600; font-size:13px; color:var(--
             <select id="depthSel" aria-label="Tree depth">
               <option value="2">2 levels</option>
               <option value="3">3 levels</option>
+            </select>
+          </label>
+          <label class="depth-toggle" style="margin-left:0">Step size η
+            <select id="etaSel" aria-label="Learning rate">
+              <option value="0.3" selected>0.3 — cautious</option>
+              <option value="0.5">0.5</option>
+              <option value="0.8">0.8 — bold</option>
             </select>
           </label>
         </div>
@@ -570,10 +577,12 @@ details.tn summary{cursor:pointer; font-weight:600; font-size:13px; color:var(--
             <div id="panelIntro" class="card" style="font-size:13px; color:var(--ink-2)">
               Each round XGBoost repeats three moves:
               <b>scan</b> all candidate splits against the current residuals (the same algebra you just did by hand),
-              <b>grow</b> a small tree from the winners, and
-              <b>nudge</b> every prediction 30% of the way toward its leaf's correction.
-              Then the leftover error becomes the next round's target. Drive it with the buttons above —
-              or flip the tree to 3 levels to watch it go deeper.
+              <b>grow</b> a brand-new small tree from the winners, and
+              <b>nudge</b> every prediction a step η toward its leaf's correction.
+              The leftover error becomes the next round's target.
+              <b>Early rounds will keep picking the same root question</b> — one gentle step can't close the smoker gap,
+              so it stays the most valuable split. Watch its gain shrink round by round until it's spent
+              and a new question takes the lead (~round 8 at η = 0.3).
             </div>
             <div id="scanPanel" hidden>
               <p class="scan-note" id="scanNote" style="margin-top:0"></p>
@@ -593,7 +602,7 @@ details.tn summary{cursor:pointer; font-weight:600; font-size:13px; color:var(--
     <section class="slide" data-title="Results">
       <div class="sin">
         <div class="eyebrow">Act III · The payoff</div>
-        <h2>Six small trees, one strong model</h2>
+        <h2>Twelve small trees, one strong model</h2>
         <p class="lead" id="resultsLead" style="margin-bottom:10px">
           Run the rounds on the previous slide (or fast-forward) and these charts fill in live.
         </p>
@@ -699,8 +708,9 @@ const DATA = [
   {age:60,sex:'M',bmi:39.9,kids:0,smoker:1,region:'SW',y:48.2},
 ];
 const N = DATA.length;
-const LAM = 1, ETA = 0.3, GAMMA = 0, MINLEAF = 2, MAXROUND = 6;
+const LAM = 1, GAMMA = 0, MINLEAF = 2, MAXROUND = 12;
 let DEPTH = 2;                     /* tree depth: adjustable 2 or 3 */
+let ETA = 0.3;                     /* learning rate: adjustable 0.3 / 0.5 / 0.8 */
 const REGION_NAMES = {SW:'Southwest', SE:'Southeast', NW:'Northwest', NE:'Northeast'};
 const ALL = DATA.map((_, i) => i);
 const MEAN = DATA.reduce((s, r) => s + r.y, 0) / N;
@@ -859,8 +869,8 @@ function drawLoss(hist){
   const svg = $('lossChart'); svg.innerHTML = '';
   const W = 520, H = 290, m = {l: 44, r: 20, t: 16, b: 38};
   const x = r => m.l + r / MAXROUND * (W - m.l - m.r);
-  const y = v => H - m.b - v / 12 * (H - m.t - m.b);
-  for (let v = 0; v <= 12; v += 3){
+  const y = v => H - m.b - v / 16 * (H - m.t - m.b);
+  for (let v = 0; v <= 16; v += 4){
     svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === 0 ? 'zeroline' : 'gridline'}));
     svg.appendChild(el('text', {x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'tick-label'}, v));
   }
@@ -1146,6 +1156,7 @@ const S = {
   scanned: 0,
   tree: null,
   scan: null,
+  lastWinner: null,
   trackerRows: [13, 9],
   trackerHist: [],
 };
@@ -1199,7 +1210,18 @@ function doScan(){
     tb.appendChild(tr);
   });
   t.appendChild(tb);
-  $('scanNote').innerHTML = `All <b>${S.scan.totalCandidates} candidate splits</b> scored against the current residuals — the same algebra you did by hand. Top 8 shown; the winner roots this round's tree.`;
+  const winner = S.scan.ranked[0];
+  let note = `All <b>${S.scan.totalCandidates} candidate splits</b> scored against the current residuals — the same algebra you did by hand. Top 8 shown; the winner roots this round's tree.`;
+  if (winner && S.lastWinner){
+    if (S.lastWinner.label === winner.cand.label){
+      note += ` <b>Same lead question as last round</b> — but its gain fell <b>${fmt(S.lastWinner.gain, 0)} → ${fmt(winner.gain, 0)}</b>: each gentle nudge uses up more of that signal.`;
+    } else {
+      const old = S.scan.ranked.find(e => e.cand.label === S.lastWinner.label);
+      note += ` <b>New lead question!</b> "${S.lastWinner.label}" is spent (gain ${fmt(S.lastWinner.gain, 0)} → ${old ? fmt(old.gain, 0) : 'below the cut'}), so <b>"${winner.cand.label}"</b> now explains the most remaining error.`;
+    }
+  }
+  if (winner) S.lastWinner = {label: winner.cand.label, gain: winner.gain};
+  $('scanNote').innerHTML = note;
   showPanel('scan');
   $('roundState').textContent = 'Scan complete. Now grow the tree inside each branch.';
   S.stage = 'grow';
@@ -1234,7 +1256,7 @@ function doApply(){
     (S.round < MAXROUND
       ? `The remaining error becomes the <em>next</em> round's target — that hand-off is the "boosting."`
       : `That was the last round — see the next two slides for the payoff.`);
-  $('roundState').textContent = S.round < MAXROUND ? 'Predictions updated. Ready for the next round.' : 'Done — six trees, one model.';
+  $('roundState').textContent = S.round < MAXROUND ? 'Predictions updated. Ready for the next round.' : `Done — ${MAXROUND} trees, one model.`;
   S.stage = 'next';
   if (S.round >= MAXROUND){ S.round = MAXROUND + 1; finishBanner(); }
   refreshStats();
@@ -1267,6 +1289,7 @@ function resetMode2(){
   S.scanned = 0;
   S.tree = null;
   S.scan = null;
+  S.lastWinner = null;
   S.trackerHist = [];
   showPanel('intro');
   $('applyNote').hidden = true;
@@ -1321,7 +1344,7 @@ function buildTakeaways(){
   const totalScans = rootScan.totalCandidates;
   const cards = [
     {n: '01', h: 'It learns from its mistakes', p: [
-      `Each tree is trained on the <b>residuals</b> — the errors — of everything before it. Tree 1 handles the big story (${rootLabel.replace('?', '')}); tree 2 works on whatever tree 1 got wrong; tree 3 cleans up after both.`,
+      `Each tree is trained on the <b>residuals</b> — the errors — of everything before it. Early trees keep re-asking the strongest question (${rootLabel.replace('?', '')}) because one gentle step can't close that gap; its gain shrinks every round until it's spent, and the lead passes to BMI, then age.`,
       `That division of labour is why a stack of small, weak trees beats one big clever one: every new tree gets a fresh, focused job.`]},
     {n: '02', h: 'It never guesses', p: [
       `You tested a handful of splits. XGBoost scored <b>all ${totalScans}</b>, every round, at every node, and provably kept the best. Gain isn't a heuristic — it's exactly how much error a split removes.`,
@@ -1331,8 +1354,8 @@ function buildTakeaways(){
       `A lone data point loses ${(100 * (1 - simSolo1 / simSolo0)).toFixed(0)}% of its influence; a group of 20 barely notices. λ makes outliers whisper and patterns shout — regularization <em>inside</em> the formula. A second dial, γ, deletes any split whose gain can't clear a minimum bar.`],
       math: `sim (λ=0) = ${fmt(soloR)}² ÷ 1 = ${fmt(simSolo0, 0)} &nbsp;→&nbsp; sim (λ=1) = ${fmt(soloR)}² ÷ 2 = ${fmt(simSolo1, 0)}`},
     {n: '04', h: 'Small steps beat big leaps', p: [
-      `Every correction was multiplied by <b>η = 0.3</b> before it touched a prediction. Why give up 70% of the fix? A full step lets one tree over-commit to noise; many small steps let later trees veto earlier mistakes.`,
-      `It's dollar-cost averaging for models: slower per round, far more reliable at the end.`]},
+      `Every correction was multiplied by <b>η</b> (0.3 by default) before it touched a prediction. Why give up 70% of the fix? A full step lets one tree over-commit to noise; many small steps let later trees veto earlier mistakes.`,
+      `It's dollar-cost averaging for models: slower per round, far more reliable at the end. Try it: set η to 0.8 on slide 7 and the smoker signal is used up by round 3 instead of round 8.`]},
     {n: '05', h: 'It finds interactions by itself', p: [
       `Round 1's tree split on <b>${rootLabel.replace('?', '')}</b>, then split that branch again on <b>${childLabel}</b>. Nobody said ${childLabel.split(' ')[0]} matters <em>differently</em> for that group — the gain math discovered the interaction.`,
       `A linear model needs you to hand-build terms like that. Trees find them automatically — why XGBoost thrives on messy business data: churn, credit, fraud, pricing.`]},
@@ -1348,7 +1371,7 @@ function buildTakeaways(){
   $('teacherNote').innerHTML =
     `<strong>Exact settings:</strong> real XGBoost math for squared-error regression — ` +
     `similarity = (Σ residuals)² ÷ (n + λ) with λ = 1, gain = sim<sub>yes</sub> + sim<sub>no</sub> − sim<sub>parent</sub>, γ = 0, ` +
-    `leaf value = Σ residuals ÷ (n + λ), learning rate η = 0.3, tree depth 2 (or 3 via the toggle on slide 7), minimum ${MINLEAF} people per leaf, ${MAXROUND} boosting rounds, base prediction = the mean (${fmt(MEAN)}). ` +
+    `leaf value = Σ residuals ÷ (n + λ), learning rate η = 0.3 (adjustable to 0.5 / 0.8 on slide 7), tree depth 2 (or 3 via the toggle), minimum ${MINLEAF} people per leaf, ${MAXROUND} boosting rounds, base prediction = the mean (${fmt(MEAN)}). ` +
     `For other objectives (e.g. classification) XGBoost swaps residuals for "gradient statistics", but every formula's structure — and everything your students just did — stays identical. ` +
     `Data: 30-person stratified sample of the canonical 1,338-person medical-cost dataset (Lantz, <em>Machine Learning with R</em>); charges in $1,000s.`;
 }
@@ -1410,6 +1433,7 @@ $('btnNext').addEventListener('click', doNext);
 $('btnFF').addEventListener('click', fastForward);
 $('btnReset').addEventListener('click', resetMode2);
 $('depthSel').addEventListener('change', e => { DEPTH = +e.target.value; resetMode2(); });
+$('etaSel').addEventListener('change', e => { ETA = +e.target.value; $('etaLbl').textContent = ETA; resetMode2(); });
 $('openTable').addEventListener('click', () => $('tableDlg').showModal());
 $('closeTable').addEventListener('click', () => $('tableDlg').close());
 $('prevBtn').addEventListener('click', () => go(cur - 1));
