@@ -1,0 +1,1374 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inside XGBoost: An Interactive Lab</title>
+<style>
+/* ============ tokens ============ */
+:root{
+  color-scheme: light;
+  --page:#f4f5f4;
+  --surface:#fdfdfc;
+  --surface-2:#eef0ee;
+  --ink:#15191b;
+  --ink-2:#555d60;
+  --ink-3:#8a908f;
+  --hairline:#e0e2df;
+  --border:rgba(21,25,27,.11);
+  --accent:#0b7a68;
+  --accent-soft:rgba(11,122,104,.10);
+  --accent-ink:#0b6c5c;
+  --smoker:#d94040;      /* series: smoker (validated red, tuned for light) */
+  --nonsmoker:#2a78d6;   /* series: non-smoker (validated blue) */
+  --smoker-soft:rgba(217,64,64,.12);
+  --nonsmoker-soft:rgba(42,120,214,.12);
+  --gold:#b97b06;        /* best-split highlight (amber, ink-safe on light) */
+  --gold-soft:rgba(237,161,0,.16);
+  --grid:#e1e3e0;
+  --baseline:#c2c5c2;
+  --pos:#0b6c5c;
+  --neg:#a8452e;
+  --card-shadow:0 1px 2px rgba(21,25,27,.05), 0 6px 22px rgba(21,25,27,.05);
+  --mono:ui-monospace,'Cascadia Code','Consolas','Menlo',monospace;
+  --serif:'Iowan Old Style','Palatino Linotype','Book Antiqua',Palatino,Georgia,serif;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --page:#0f1213;
+    --surface:#171b1c;
+    --surface-2:#1e2324;
+    --ink:#f0f1ee;
+    --ink-2:#b4bab8;
+    --ink-3:#7f8785;
+    --hairline:#272c2d;
+    --border:rgba(255,255,255,.11);
+    --accent:#3cbaa2;
+    --accent-soft:rgba(60,186,162,.13);
+    --accent-ink:#4ecdb4;
+    --smoker:#e66767;
+    --nonsmoker:#3987e5;
+    --smoker-soft:rgba(230,103,103,.15);
+    --nonsmoker-soft:rgba(57,135,229,.15);
+    --gold:#e5a93d;
+    --gold-soft:rgba(229,169,61,.16);
+    --grid:#252a2b;
+    --baseline:#3a4041;
+    --pos:#4ecdb4;
+    --neg:#e58b6b;
+    --card-shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.25);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#0f1213;
+  --surface:#171b1c;
+  --surface-2:#1e2324;
+  --ink:#f0f1ee;
+  --ink-2:#b4bab8;
+  --ink-3:#7f8785;
+  --hairline:#272c2d;
+  --border:rgba(255,255,255,.11);
+  --accent:#3cbaa2;
+  --accent-soft:rgba(60,186,162,.13);
+  --accent-ink:#4ecdb4;
+  --smoker:#e66767;
+  --nonsmoker:#3987e5;
+  --smoker-soft:rgba(230,103,103,.15);
+  --nonsmoker-soft:rgba(57,135,229,.15);
+  --gold:#e5a93d;
+  --gold-soft:rgba(229,169,61,.16);
+  --grid:#252a2b;
+  --baseline:#3a4041;
+  --pos:#4ecdb4;
+  --neg:#e58b6b;
+  --card-shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.25);
+}
+:root[data-theme="light"]{
+  color-scheme: light;
+  --page:#f4f5f4; --surface:#fdfdfc; --surface-2:#eef0ee; --ink:#15191b; --ink-2:#555d60;
+  --ink-3:#8a908f; --hairline:#e0e2df; --border:rgba(21,25,27,.11); --accent:#0b7a68;
+  --accent-soft:rgba(11,122,104,.10); --accent-ink:#0b6c5c; --smoker:#d94040; --nonsmoker:#2a78d6;
+  --smoker-soft:rgba(217,64,64,.12); --nonsmoker-soft:rgba(42,120,214,.12); --gold:#b97b06;
+  --gold-soft:rgba(237,161,0,.16); --grid:#e1e3e0; --baseline:#c2c5c2; --pos:#0b6c5c; --neg:#a8452e;
+  --card-shadow:0 1px 2px rgba(21,25,27,.05), 0 6px 22px rgba(21,25,27,.05);
+}
+
+/* ============ base ============ */
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none !important; animation:none !important}
+}
+body{
+  margin:0; background:var(--page); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:var(--serif); font-weight:600; line-height:1.15; text-wrap:balance; margin:0}
+p{margin:0 0 1em}
+a{color:var(--accent-ink)}
+button{font:inherit; cursor:pointer}
+svg{display:block; max-width:100%}
+.wrap{max-width:1080px; margin:0 auto; padding:0 24px}
+.prose{max-width:680px}
+.prose p{color:var(--ink-2)}
+.prose strong{color:var(--ink)}
+code,.mono{font-family:var(--mono); font-size:.92em}
+.num{font-variant-numeric:tabular-nums}
+
+/* ============ nav ============ */
+.topnav{
+  position:sticky; top:0; z-index:50;
+  background:color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--hairline);
+}
+.topnav .wrap{display:flex; align-items:center; gap:20px; height:52px}
+.topnav .brand{font-family:var(--serif); font-size:17px; font-weight:600; white-space:nowrap}
+.topnav .brand span{color:var(--accent-ink)}
+.topnav nav{display:flex; gap:4px; overflow-x:auto; margin-left:auto}
+.topnav nav a{
+  text-decoration:none; color:var(--ink-2); font-size:13px; font-weight:500;
+  padding:6px 11px; border-radius:999px; white-space:nowrap;
+}
+.topnav nav a:hover{background:var(--surface-2); color:var(--ink)}
+.topnav nav a.active{background:var(--accent-soft); color:var(--accent-ink)}
+
+/* ============ hero ============ */
+.hero{padding:72px 0 56px; border-bottom:1px solid var(--hairline)}
+.hero .eyebrow{margin-bottom:18px}
+.hero h1{font-size:clamp(38px,6vw,60px); letter-spacing:-.01em; max-width:14em}
+.hero .sub{font-size:19px; color:var(--ink-2); max-width:620px; margin:22px 0 0}
+.hero .sub strong{color:var(--ink)}
+.hero-cards{display:flex; gap:14px; margin-top:36px; flex-wrap:wrap}
+.hero-card{
+  flex:1 1 220px; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; padding:16px 18px; box-shadow:var(--card-shadow);
+}
+.hero-card .k{font-family:var(--serif); font-size:22px; font-weight:600}
+.hero-card .k em{font-style:normal; color:var(--accent-ink)}
+.hero-card p{font-size:13.5px; color:var(--ink-2); margin:6px 0 0}
+
+.eyebrow{
+  display:inline-flex; align-items:center; gap:10px;
+  font-size:12px; font-weight:600; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--accent-ink);
+}
+.eyebrow::before{content:''; width:26px; height:2px; background:var(--accent); border-radius:2px}
+
+/* ============ sections ============ */
+section.part{padding:64px 0 24px; scroll-margin-top:70px}
+section.part > .wrap > h2{font-size:clamp(28px,4vw,38px); margin:14px 0 18px}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:22px 24px; box-shadow:var(--card-shadow); margin:22px 0;
+}
+.card h3{font-size:20px; margin-bottom:10px}
+.card .hint{font-size:13px; color:var(--ink-3)}
+.two-col{display:grid; grid-template-columns:1fr 1fr; gap:22px; align-items:start}
+@media (max-width:860px){ .two-col{grid-template-columns:1fr} }
+
+/* ============ chart chrome ============ */
+.fig{margin:22px 0}
+.fig .fig-head{display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:8px}
+.fig .fig-title{font-weight:600; font-size:15px}
+.fig .fig-sub{font-size:13px; color:var(--ink-3)}
+.legend{display:flex; gap:18px; font-size:13px; color:var(--ink-2); align-items:center; flex-wrap:wrap}
+.legend .li{display:inline-flex; align-items:center; gap:7px}
+.legend .sw{width:11px; height:11px; border-radius:50%}
+.sw.smoker{background:var(--smoker)}
+.sw.nonsmoker{background:transparent; border:2.5px solid var(--nonsmoker)}
+.chart-box{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px; box-shadow:var(--card-shadow)}
+.axis-label{font-size:11.5px; fill:var(--ink-3); font-family:var(--sans)}
+.tick-label{font-size:11px; fill:var(--ink-3); font-family:var(--sans); font-variant-numeric:tabular-nums}
+.gridline{stroke:var(--grid); stroke-width:1}
+.zeroline{stroke:var(--baseline); stroke-width:1.5}
+
+#tooltip{
+  position:fixed; z-index:99; pointer-events:none; display:none;
+  background:var(--ink); color:var(--page);
+  font-size:12.5px; line-height:1.45; padding:8px 11px; border-radius:8px;
+  max-width:240px; box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+#tooltip .tt-title{font-weight:600}
+
+/* ============ data table ============ */
+.tbl-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:12px; background:var(--surface); box-shadow:var(--card-shadow)}
+table.data{border-collapse:collapse; width:100%; font-size:13.5px}
+table.data th{
+  text-align:right; font-weight:600; font-size:11.5px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--ink-3); padding:10px 14px; border-bottom:1px solid var(--hairline); white-space:nowrap;
+}
+table.data th:nth-child(-n+2){text-align:left}
+table.data td{padding:7px 14px; border-bottom:1px solid var(--hairline); text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+table.data td:nth-child(-n+2){text-align:left}
+table.data tr:last-child td{border-bottom:none}
+table.data tr.smoker-row td:first-child{box-shadow:inset 3px 0 0 var(--smoker)}
+table.data td.money{font-family:var(--mono); font-size:12.5px}
+.pill{display:inline-block; font-size:11.5px; font-weight:600; padding:2px 9px; border-radius:999px}
+.pill.yes{background:var(--smoker-soft); color:var(--smoker)}
+.pill.no{background:var(--nonsmoker-soft); color:var(--nonsmoker)}
+
+details.tbl-details summary{
+  cursor:pointer; font-weight:600; font-size:14px; color:var(--accent-ink);
+  padding:6px 0; list-style-position:outside;
+}
+
+/* ============ math blocks ============ */
+.math{
+  font-family:var(--mono); font-size:14px; line-height:1.5;
+  background:var(--surface-2); border-radius:10px; padding:14px 18px;
+  overflow-x:auto; margin:12px 0; white-space:nowrap;
+}
+.math .lbl{color:var(--ink-3); font-size:12px; display:block; font-family:var(--sans); white-space:normal; margin-bottom:4px}
+.frac{display:inline-flex; flex-direction:column; text-align:center; vertical-align:middle; margin:0 4px}
+.frac .top{padding:0 8px; border-bottom:1.5px solid currentColor}
+.frac .bot{padding:0 8px}
+.math .result{font-weight:700; color:var(--accent-ink)}
+.math .op{color:var(--ink-3); margin:0 6px}
+.formula-card{
+  border-left:3px solid var(--accent); background:var(--accent-soft);
+  border-radius:0 10px 10px 0; padding:14px 18px; margin:16px 0; font-size:14.5px;
+}
+.formula-card .fname{font-weight:700; font-size:13px; letter-spacing:.05em; text-transform:uppercase; color:var(--accent-ink); margin-bottom:4px}
+.formula-card .mono{font-size:14px}
+
+/* ============ mode 1 controls ============ */
+.chip-row{display:flex; gap:8px; flex-wrap:wrap; margin:12px 0}
+.chip{
+  border:1.5px solid var(--border); background:var(--surface); color:var(--ink-2);
+  border-radius:999px; padding:7px 16px; font-size:14px; font-weight:500;
+}
+.chip:hover{border-color:var(--accent); color:var(--ink)}
+.chip.on{background:var(--accent); border-color:var(--accent); color:#fff}
+.thr-box{margin:14px 0}
+.thr-box label{font-size:13px; color:var(--ink-3); display:block; margin-bottom:6px}
+.thr-box input[type=range]{width:100%; max-width:420px; accent-color:var(--accent)}
+.thr-readout{font-family:var(--mono); font-size:17px; font-weight:700; margin-top:4px}
+.btn{
+  background:var(--accent); color:#fff; border:none; border-radius:9px;
+  padding:11px 22px; font-size:15px; font-weight:600;
+  box-shadow:var(--card-shadow);
+}
+.btn:hover{filter:brightness(1.08)}
+.btn:focus-visible,.chip:focus-visible,button:focus-visible{outline:2.5px solid var(--accent); outline-offset:2px}
+.btn.ghost{background:var(--surface); color:var(--accent-ink); border:1.5px solid var(--accent)}
+.btn.gold{background:var(--gold); color:#fff}
+.btn:disabled{opacity:.45; cursor:not-allowed; filter:none}
+
+.buckets{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:14px 0}
+@media (max-width:700px){ .buckets{grid-template-columns:1fr} }
+.bucket{border:1px solid var(--border); border-radius:10px; overflow:hidden}
+.bucket .b-head{padding:9px 14px; font-size:13px; font-weight:700; border-bottom:1px solid var(--hairline)}
+.bucket.left .b-head{background:var(--accent-soft); color:var(--accent-ink)}
+.bucket.right .b-head{background:var(--surface-2); color:var(--ink-2)}
+.bucket .b-chips{padding:10px 12px; display:flex; flex-wrap:wrap; gap:6px; min-height:44px}
+.rchip{
+  font-family:var(--mono); font-size:12px; padding:3px 8px; border-radius:6px;
+  background:var(--surface-2); border:1px solid var(--hairline); font-variant-numeric:tabular-nums;
+}
+.rchip.p{color:var(--pos)} .rchip.n{color:var(--neg)}
+.bucket .b-sum{padding:9px 14px; border-top:1px solid var(--hairline); font-family:var(--mono); font-size:13px}
+.step{margin:20px 0}
+.step .step-tag{
+  display:inline-block; font-size:11.5px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--accent-ink); background:var(--accent-soft); border-radius:5px; padding:3px 9px; margin-bottom:8px;
+}
+.gain-hero{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin:8px 0 2px}
+.gain-hero .g-num{font-family:var(--serif); font-size:44px; font-weight:600; line-height:1}
+.gain-hero .g-cap{font-size:13.5px; color:var(--ink-2); max-width:340px}
+
+.lb-table{width:100%; border-collapse:collapse; font-size:14px}
+.lb-table th{text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-3); padding:8px 10px; border-bottom:1px solid var(--hairline)}
+.lb-table td{padding:8px 10px; border-bottom:1px solid var(--hairline); font-variant-numeric:tabular-nums}
+.lb-table td.g{font-family:var(--mono); text-align:right; font-weight:600}
+.lb-table th.g{text-align:right}
+.lb-table tr.best td{background:var(--gold-soft); font-weight:600}
+.lb-table .who{font-size:11.5px; font-weight:700; border-radius:5px; padding:2px 7px}
+.lb-table .who.you{background:var(--accent-soft); color:var(--accent-ink)}
+.lb-table .who.xgb{background:var(--gold-soft); color:var(--gold)}
+.gain-bar{height:10px; background:var(--surface-2); border-radius:5px; overflow:hidden; position:relative; margin:6px 0 2px}
+.gain-bar .fill{height:100%; border-radius:5px; background:var(--accent); transition:width .5s ease}
+.gain-bar .fill.gold{background:var(--gold)}
+.bar-cap{font-size:12.5px; color:var(--ink-3)}
+
+/* ============ mode 2 ============ */
+.round-head{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px}
+.round-badge{
+  font-family:var(--serif); font-size:20px; font-weight:600;
+  background:var(--ink); color:var(--page); border-radius:9px; padding:5px 15px;
+}
+.stat-row{display:flex; gap:14px; flex-wrap:wrap; margin:16px 0}
+.stat{flex:1 1 150px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:13px 16px; box-shadow:var(--card-shadow)}
+.stat .s-lbl{font-size:11.5px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--ink-3)}
+.stat .s-val{font-family:var(--serif); font-size:27px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums}
+.stat .s-sub{font-size:12px; color:var(--ink-3)}
+.stat.good .s-val{color:var(--accent-ink)}
+.action-row{display:flex; gap:10px; flex-wrap:wrap; margin:18px 0 6px}
+.scan-note{font-size:13.5px; color:var(--ink-2); margin-top:10px}
+tr.winner td{background:var(--gold-soft); font-weight:600}
+.tree-svg text{font-family:var(--mono)}
+.tracker-table td:first-child{text-align:left}
+.muted-s{color:var(--ink-3); font-size:13px}
+
+/* ============ takeaway cards ============ */
+.take-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:16px; margin:26px 0}
+.take{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px 22px; box-shadow:var(--card-shadow)}
+.take .t-num{font-family:var(--mono); font-size:12px; font-weight:700; color:var(--accent-ink); letter-spacing:.1em}
+.take h3{font-size:19px; margin:6px 0 8px}
+.take p{font-size:14px; color:var(--ink-2); margin:0}
+.take p + p{margin-top:8px}
+.take .mini-math{font-family:var(--mono); font-size:13px; background:var(--surface-2); border-radius:8px; padding:9px 12px; margin-top:10px; overflow-x:auto; white-space:nowrap}
+
+footer{border-top:1px solid var(--hairline); margin-top:60px; padding:34px 0 46px; font-size:13px; color:var(--ink-3)}
+footer .wrap{display:grid; gap:8px}
+.footnote{background:var(--surface-2); border-radius:10px; padding:14px 18px; font-size:13px; color:var(--ink-2); margin:20px 0}
+.footnote strong{color:var(--ink)}
+</style>
+
+<div id="tooltip" role="status"></div>
+
+<header class="topnav">
+  <div class="wrap">
+    <div class="brand">Inside <span>XGBoost</span></div>
+    <nav aria-label="Parts">
+      <a href="#part-data">01 · The data</a>
+      <a href="#part-you">02 · You split</a>
+      <a href="#part-xgb">03 · XGBoost's turn</a>
+      <a href="#part-why">04 · Why it wins</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="eyebrow">An interactive lab · no calculus required</div>
+    <h1>You just joined the pricing team. Your model is one number.</h1>
+    <p class="sub">
+      XGBoost is the algorithm behind credit scoring, churn prediction, insurance pricing, and a
+      decade of machine-learning competition wins. In this lab you'll price real health-insurance
+      customers — first <strong>by hand</strong>, then <strong>the way XGBoost actually does it</strong> —
+      and see exactly why it's so hard to beat.
+    </p>
+    <div class="hero-cards">
+      <div class="hero-card"><div class="k">Part <em>01</em></div><p>Meet 30 real customers and start with the dumbest possible model: one average.</p></div>
+      <div class="hero-card"><div class="k">Part <em>02</em></div><p>You pick a split. We walk through every line of the algebra XGBoost would run.</p></div>
+      <div class="hero-card"><div class="k">Part <em>03</em></div><p>XGBoost checks <span class="mono" data-fill="ncand">–</span> splits, grows a tree, and boosts — round after round.</p></div>
+      <div class="hero-card"><div class="k">Part <em>04</em></div><p>The five ideas that make it win, each one tied to a number you just computed.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= PART 1 : DATA ================= -->
+<section class="part" id="part-data">
+  <div class="wrap">
+    <div class="eyebrow">Part 01 · The data</div>
+    <h2>Thirty customers, one question: what will they cost?</h2>
+    <div class="prose">
+      <p>
+        This is a sample from a canonical, real dataset of <strong>1,338 U.S. health-insurance
+        customers</strong>. For each person we know six things — age, sex, body-mass index,
+        number of children, smoking status, and region — and one outcome: their
+        <strong>annual medical charges</strong> (shown in $1,000s). Your job as the pricing
+        analyst: predict charges for people like these.
+      </p>
+      <p>
+        Look at the scatter below before reading on. What patterns do <em>you</em> see?
+        Hover any dot to meet the person behind it.
+      </p>
+    </div>
+
+    <div class="fig">
+      <div class="fig-head">
+        <div>
+          <div class="fig-title">Annual medical charges by age</div>
+          <div class="fig-sub">Each dot is one customer · charges in $1,000s per year</div>
+        </div>
+        <div class="legend">
+          <span class="li"><span class="sw smoker"></span>Smoker</span>
+          <span class="li"><span class="sw nonsmoker"></span>Non-smoker</span>
+        </div>
+      </div>
+      <div class="chart-box"><svg id="introScatter" viewBox="0 0 760 420" role="img" aria-label="Scatter plot of charges versus age, colored by smoking status"></svg></div>
+    </div>
+
+    <details class="tbl-details">
+      <summary>Show all 30 customers as a table</summary>
+      <div class="tbl-wrap" style="margin-top:12px"><table class="data" id="dataTable"></table></div>
+    </details>
+
+    <div class="card">
+      <h3>Step zero: the one-number model</h3>
+      <div class="prose">
+        <p>
+          Every gradient-boosting model starts embarrassingly simple: predict the <strong>same
+          number for everyone</strong>. With squared error, the best single number is the average —
+          here <strong class="mono num" data-fill="mean1">–</strong> ($1,000s) per person.
+        </p>
+        <p>
+          For each customer, the amount that prediction misses by is their
+          <strong>residual</strong>: <span class="mono">residual = actual − predicted</span>.
+          A positive residual means we're under-charging them; negative means over-charging.
+          Everything XGBoost does from here on is an attempt to shrink these residuals.
+        </p>
+      </div>
+      <div class="fig" style="margin-bottom:6px">
+        <div class="fig-head">
+          <div>
+            <div class="fig-title">Residuals under the one-number model</div>
+            <div class="fig-sub">Distance from zero = how wrong the model is for that person ($1,000s)</div>
+          </div>
+          <div class="legend">
+            <span class="li"><span class="sw smoker"></span>Smoker</span>
+            <span class="li"><span class="sw nonsmoker"></span>Non-smoker</span>
+          </div>
+        </div>
+        <div class="chart-box"><svg id="residStrip0" viewBox="0 0 760 190" role="img" aria-label="Strip plot of residuals under the mean-only model"></svg></div>
+      </div>
+      <p class="muted-s">
+        Notice anything? The dots far to the right — the customers we're badly under-charging —
+        are almost all one color. Hold that thought.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PART 2 : YOU SPLIT ================= -->
+<section class="part" id="part-you">
+  <div class="wrap">
+    <div class="eyebrow">Part 02 · You be the algorithm</div>
+    <h2>Split the room. We'll run the numbers.</h2>
+    <div class="prose">
+      <p>
+        A tree improves on the one-number model by asking a yes/no question — a
+        <strong>split</strong> — and giving each side its own prediction. XGBoost scores every
+        possible split with two pieces of algebra, then keeps the best. Your turn first.
+      </p>
+    </div>
+
+    <div class="formula-card">
+      <div class="fname">The two formulas you need</div>
+      <div class="mono" style="margin-bottom:6px">Similarity of a group &nbsp;=&nbsp; (sum of its residuals)² ÷ (group size + λ)</div>
+      <div class="mono">Gain of a split &nbsp;=&nbsp; Similarity<sub>left</sub> + Similarity<sub>right</sub> − Similarity<sub>parent</sub></div>
+      <p style="margin:10px 0 0; font-size:13.5px">
+        Intuition: if a group's residuals all point the same way (all under-charged, say), their
+        sum is big and the group is easy to fix with one shared correction — high similarity.
+        If they point in opposite directions they cancel out — low similarity, nothing gained by
+        grouping them. <strong>λ (lambda) = 1</strong> here; it's a skepticism dial we'll return to in Part 04.
+        Bigger gain = better split.
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>Pick your split</h3>
+      <p class="hint" style="margin:0 0 4px">Choose a feature, set the question, then run the numbers. Try to beat your classmates' gain — and then see if anyone can beat XGBoost.</p>
+      <div class="chip-row" id="featChips" role="group" aria-label="Choose a feature"></div>
+      <div class="thr-box" id="thrBox"></div>
+      <button class="btn" id="runSplit">Run the numbers →</button>
+    </div>
+
+    <div id="walkthrough" hidden>
+      <div class="card">
+        <h3 id="wtTitle">Walkthrough</h3>
+
+        <div class="step">
+          <span class="step-tag">Step 1 · Split the room</span>
+          <p class="muted-s" style="margin:0 0 6px">Each chip is one customer's residual (actual − predicted, in $1,000s), sorted into the two groups your question creates.</p>
+          <div class="buckets">
+            <div class="bucket left">
+              <div class="b-head" id="bLeftHead">Yes</div>
+              <div class="b-chips" id="bLeftChips"></div>
+              <div class="b-sum" id="bLeftSum"></div>
+            </div>
+            <div class="bucket right">
+              <div class="b-head" id="bRightHead">No</div>
+              <div class="b-chips" id="bRightChips"></div>
+              <div class="b-sum" id="bRightSum"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-tag">Step 2 · Score each group</span>
+          <div class="math" id="mathLeft"></div>
+          <div class="math" id="mathRight"></div>
+          <div class="math" id="mathParent"></div>
+        </div>
+
+        <div class="step">
+          <span class="step-tag">Step 3 · Compute the gain</span>
+          <div class="math" id="mathGain"></div>
+          <div class="gain-hero">
+            <div class="g-num num" id="gainNum">–</div>
+            <div class="g-cap" id="gainCap"></div>
+          </div>
+        </div>
+
+        <div class="step" id="stepLeaf">
+          <span class="step-tag">Step 4 · What would each side predict?</span>
+          <p class="muted-s" style="margin:0 0 6px">If we stopped here, each leaf would add a correction to the base prediction:
+            <span class="mono">leaf value = (sum of residuals) ÷ (size + λ)</span></p>
+          <div class="math" id="mathLeaves"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Class leaderboard</h3>
+        <div class="gain-bar"><div class="fill" id="userBarFill" style="width:0%"></div></div>
+        <div class="bar-cap" id="userBarCap">Your best gain so far, as a share of the best possible gain (hidden until you reveal it).</div>
+        <table class="lb-table" style="margin-top:12px">
+          <thead><tr><th>#</th><th>Split</th><th class="g">Gain</th><th></th></tr></thead>
+          <tbody id="lbBody"></tbody>
+        </table>
+        <div class="action-row">
+          <button class="btn gold" id="revealBtn">Reveal XGBoost's answer</button>
+        </div>
+        <p class="muted-s" id="revealNote" hidden></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PART 3 : XGBOOST'S TURN ================= -->
+<section class="part" id="part-xgb">
+  <div class="wrap">
+    <div class="eyebrow">Part 03 · XGBoost's turn</div>
+    <h2>No guessing. Every split, every round.</h2>
+    <div class="prose">
+      <p>
+        Here's the actual algorithm, with nothing hidden: each round it
+        <strong>(1) scans every candidate split</strong> and keeps the winner,
+        <strong>(2) grows a small tree</strong> (two levels deep here), and
+        <strong>(3) nudges every prediction</strong> a fraction of the way toward what the tree
+        suggests. Then it recomputes residuals and goes again — each new tree fixing what the
+        last ones missed. Drive it yourself with the buttons.
+      </p>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat"><div class="s-lbl">Round</div><div class="s-val num" id="statRound">1</div><div class="s-sub">of 6</div></div>
+      <div class="stat"><div class="s-lbl">Typical miss (RMSE)</div><div class="s-val num" id="statRmse">–</div><div class="s-sub">$1,000s per person</div></div>
+      <div class="stat good"><div class="s-lbl">Improvement</div><div class="s-val num" id="statImp">0%</div><div class="s-sub">vs. the one-number model</div></div>
+      <div class="stat"><div class="s-lbl">Splits scanned</div><div class="s-val num" id="statScanned">0</div><div class="s-sub">so far, all rounds</div></div>
+    </div>
+
+    <div class="card">
+      <div class="round-head">
+        <div class="round-badge" id="roundBadge">Round 1</div>
+        <div class="muted-s" id="roundState">The residuals below are what's left to explain.</div>
+      </div>
+
+      <div class="fig" style="margin-top:14px">
+        <div class="fig-head">
+          <div>
+            <div class="fig-title">Residuals entering this round</div>
+            <div class="fig-sub">Same scale every round — watch the cloud collapse toward zero ($1,000s)</div>
+          </div>
+          <div class="legend">
+            <span class="li"><span class="sw smoker"></span>Smoker</span>
+            <span class="li"><span class="sw nonsmoker"></span>Non-smoker</span>
+          </div>
+        </div>
+        <div class="chart-box"><svg id="residStripR" viewBox="0 0 760 190" role="img" aria-label="Strip plot of current residuals"></svg></div>
+      </div>
+
+      <div class="action-row">
+        <button class="btn" id="btnScan">1 · Scan every split</button>
+        <button class="btn" id="btnGrow" disabled>2 · Grow the tree</button>
+        <button class="btn" id="btnApply" disabled>3 · Update predictions (η = 0.3)</button>
+        <button class="btn ghost" id="btnNext" disabled>Start next round →</button>
+        <button class="btn ghost" id="btnFF">Fast-forward to round 6 ⏩</button>
+        <button class="btn ghost" id="btnReset">↺ Reset demo</button>
+      </div>
+
+      <div id="scanPanel" hidden>
+        <h3 style="margin-top:16px">The scan: every candidate split, ranked</h3>
+        <p class="scan-note" id="scanNote"></p>
+        <div class="tbl-wrap" style="box-shadow:none"><table class="data" id="scanTable"></table></div>
+      </div>
+
+      <div id="treePanel" hidden>
+        <h3 style="margin-top:22px">The tree this round</h3>
+        <p class="scan-note">The winning split becomes the root; then the scan repeats <em>inside each branch</em>. Leaves show the correction they'd apply: <span class="mono">Σ residuals ÷ (n + λ)</span>.</p>
+        <div class="chart-box" style="margin-top:10px"><svg id="treeSvg" class="tree-svg" viewBox="0 0 960 380" role="img" aria-label="Decision tree diagram for this round"></svg></div>
+      </div>
+
+      <div id="applyPanel" hidden>
+        <h3 style="margin-top:22px">The nudge</h3>
+        <p class="scan-note" id="applyNote"></p>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="fig" style="margin:0">
+        <div class="fig-head"><div>
+          <div class="fig-title">Typical miss by round</div>
+          <div class="fig-sub">RMSE in $1,000s · round 0 = one-number model</div>
+        </div></div>
+        <div class="chart-box"><svg id="lossChart" viewBox="0 0 520 300" role="img" aria-label="Line chart of RMSE by boosting round"></svg></div>
+      </div>
+      <div class="fig" style="margin:0">
+        <div class="fig-head">
+          <div>
+            <div class="fig-title">Predicted vs. actual</div>
+            <div class="fig-sub">Dots on the dashed line = perfect predictions ($1,000s)</div>
+          </div>
+          <div class="legend">
+            <span class="li"><span class="sw smoker"></span>Smoker</span>
+            <span class="li"><span class="sw nonsmoker"></span>Non-smoker</span>
+          </div>
+        </div>
+        <div class="chart-box"><svg id="paChart" viewBox="0 0 520 300" role="img" aria-label="Scatter of predicted versus actual charges"></svg></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Follow two customers</h3>
+      <p class="hint" style="margin-bottom:8px">The final prediction is just a running sum: base + η·(tree 1's leaf) + η·(tree 2's leaf) + … Watch it converge person by person.</p>
+      <div class="tbl-wrap" style="box-shadow:none"><table class="data tracker-table" id="trackerTable"></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= PART 4 : WHY ================= -->
+<section class="part" id="part-why">
+  <div class="wrap">
+    <div class="eyebrow">Part 04 · Why it wins</div>
+    <h2>Five ideas, each one already on your worksheet</h2>
+    <div class="take-grid" id="takeGrid"></div>
+
+    <div class="footnote" id="teacherNote"></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div><strong>Data:</strong> 30-person sample (stratified to include extra smokers) of the canonical 1,338-person U.S. medical-cost dataset (Lantz, <em>Machine Learning with R</em>); charges shown in $1,000s, rounded to one decimal.</div>
+    <div>All numbers on this page are computed live in your browser — this <em>is</em> the XGBoost algorithm for squared-error loss, just at classroom size.</div>
+  </div>
+</footer>
+
+<script>
+'use strict';
+/* ================= data ================= */
+const DATA = [
+  {age:19,sex:'F',bmi:27.9,kids:0,smoker:1,region:'SW',y:16.9},
+  {age:18,sex:'M',bmi:33.8,kids:1,smoker:0,region:'SE',y:1.7},
+  {age:28,sex:'M',bmi:33.0,kids:3,smoker:0,region:'SE',y:4.4},
+  {age:33,sex:'M',bmi:22.7,kids:0,smoker:0,region:'NW',y:22.0},
+  {age:32,sex:'M',bmi:28.9,kids:0,smoker:0,region:'NW',y:3.9},
+  {age:31,sex:'F',bmi:25.7,kids:0,smoker:0,region:'SE',y:3.8},
+  {age:46,sex:'F',bmi:33.4,kids:1,smoker:0,region:'SE',y:8.2},
+  {age:37,sex:'F',bmi:27.7,kids:3,smoker:0,region:'NW',y:7.3},
+  {age:60,sex:'F',bmi:25.8,kids:0,smoker:0,region:'NW',y:28.9},
+  {age:25,sex:'M',bmi:26.2,kids:0,smoker:0,region:'NE',y:2.7},
+  {age:62,sex:'F',bmi:26.3,kids:0,smoker:1,region:'SE',y:27.8},
+  {age:23,sex:'M',bmi:34.4,kids:0,smoker:0,region:'SW',y:1.8},
+  {age:56,sex:'F',bmi:39.8,kids:0,smoker:0,region:'SE',y:11.1},
+  {age:27,sex:'M',bmi:42.1,kids:0,smoker:1,region:'SE',y:39.6},
+  {age:19,sex:'M',bmi:24.6,kids:1,smoker:0,region:'SW',y:1.8},
+  {age:52,sex:'F',bmi:30.8,kids:1,smoker:0,region:'NE',y:10.8},
+  {age:56,sex:'M',bmi:40.3,kids:0,smoker:0,region:'SW',y:10.6},
+  {age:30,sex:'M',bmi:35.3,kids:0,smoker:1,region:'SW',y:36.8},
+  {age:60,sex:'F',bmi:36.0,kids:0,smoker:0,region:'NE',y:13.2},
+  {age:30,sex:'F',bmi:32.4,kids:1,smoker:0,region:'SW',y:4.1},
+  {age:34,sex:'F',bmi:31.9,kids:1,smoker:1,region:'NE',y:37.7},
+  {age:59,sex:'F',bmi:27.7,kids:3,smoker:0,region:'SE',y:14.0},
+  {age:63,sex:'F',bmi:23.1,kids:0,smoker:0,region:'NE',y:14.5},
+  {age:31,sex:'M',bmi:36.3,kids:2,smoker:1,region:'SW',y:38.7},
+  {age:22,sex:'M',bmi:35.6,kids:0,smoker:1,region:'SW',y:35.6},
+  {age:19,sex:'F',bmi:28.6,kids:5,smoker:0,region:'SW',y:4.7},
+  {age:63,sex:'M',bmi:28.3,kids:0,smoker:0,region:'NW',y:13.8},
+  {age:28,sex:'M',bmi:36.4,kids:1,smoker:1,region:'SW',y:51.2},
+  {age:41,sex:'M',bmi:21.8,kids:1,smoker:0,region:'SE',y:6.3},
+  {age:60,sex:'M',bmi:39.9,kids:0,smoker:1,region:'SW',y:48.2},
+];
+const N = DATA.length;
+const LAM = 1, ETA = 0.3, GAMMA = 0, MINLEAF = 2, MAXDEPTH = 2, MAXROUND = 6;
+const REGION_NAMES = {SW:'Southwest', SE:'Southeast', NW:'Northwest', NE:'Northeast'};
+const ALL = DATA.map((_, i) => i);
+const MEAN = DATA.reduce((s, r) => s + r.y, 0) / N;
+
+/* ================= helpers ================= */
+const $ = id => document.getElementById(id);
+const fmt = (x, d = 1) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+const fmtS = (x, d = 1) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(d);
+const money = x => '$' + (x * 1000).toLocaleString('en-US', {maximumFractionDigits: 0});
+function el(tag, attrs, text){
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  return e;
+}
+const seriesColor = r => r.smoker ? 'var(--smoker)' : 'var(--nonsmoker)';
+
+/* dot with shape encoding: smoker = filled, non-smoker = hollow */
+function personDot(x, y, r, row, rad){
+  rad = rad || 5.5;
+  const c = el('circle', {cx: x, cy: y, r: rad});
+  if (row.smoker){ c.setAttribute('fill', 'var(--smoker)'); c.setAttribute('stroke', 'var(--surface)'); c.setAttribute('stroke-width', '1.5'); }
+  else { c.setAttribute('fill', 'var(--surface)'); c.setAttribute('stroke', 'var(--nonsmoker)'); c.setAttribute('stroke-width', '2.2'); }
+  return c;
+}
+
+/* tooltip */
+const tip = $('tooltip');
+function bindTip(node, html){
+  node.addEventListener('mouseenter', () => { tip.innerHTML = html; tip.style.display = 'block'; });
+  node.addEventListener('mousemove', ev => {
+    const pad = 14;
+    let x = ev.clientX + pad, y = ev.clientY + pad;
+    const bw = tip.offsetWidth, bh = tip.offsetHeight;
+    if (x + bw > innerWidth - 8) x = ev.clientX - bw - pad;
+    if (y + bh > innerHeight - 8) y = ev.clientY - bh - pad;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  });
+  node.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+}
+function personTip(i, extra){
+  const r = DATA[i];
+  return `<div class="tt-title">Customer #${i + 1}</div>` +
+    `${r.age} yrs · ${r.sex === 'F' ? 'female' : 'male'} · BMI ${r.bmi.toFixed(1)} · ${r.kids} kid${r.kids === 1 ? '' : 's'}<br>` +
+    `${r.smoker ? 'Smoker' : 'Non-smoker'} · ${REGION_NAMES[r.region]}<br>` +
+    `Charges: <b>${money(r.y)}</b>` + (extra ? '<br>' + extra : '');
+}
+
+/* ================= XGBoost engine (squared loss) ================= */
+const sim = (sum, n) => (sum * sum) / (n + LAM);
+
+function candidateSplits(idxs){
+  const out = [];
+  for (const f of [['age', 'age'], ['bmi', 'BMI'], ['kids', 'children']]){
+    const key = f[0], name = f[1];
+    const vals = [...new Set(idxs.map(i => DATA[i][key]))].sort((a, b) => a - b);
+    for (let v = 0; v < vals.length - 1; v++){
+      const thr = (vals[v] + vals[v + 1]) / 2;
+      out.push({feat: key, label: `${name} < ${+thr.toFixed(2)}`, yes: 'yes', no: 'no',
+                test: r => r[key] < thr});
+    }
+  }
+  if (new Set(idxs.map(i => DATA[i].smoker)).size > 1)
+    out.push({feat: 'smoker', label: 'smoker?', test: r => r.smoker === 1});
+  if (new Set(idxs.map(i => DATA[i].sex)).size > 1)
+    out.push({feat: 'sex', label: 'sex = female?', test: r => r.sex === 'F'});
+  const regs = [...new Set(idxs.map(i => DATA[i].region))];
+  if (regs.length > 1)
+    for (const rg of ['SW', 'SE', 'NW', 'NE']) if (regs.includes(rg))
+      out.push({feat: 'region', label: `region = ${REGION_NAMES[rg]}?`, test: r => r.region === rg});
+  return out;
+}
+
+function evalSplit(cand, idxs, resid){
+  const L = [], R = [];
+  for (const i of idxs) (cand.test(DATA[i]) ? L : R).push(i);
+  if (L.length < MINLEAF || R.length < MINLEAF) return null;
+  const sL = L.reduce((s, i) => s + resid[i], 0);
+  const sR = R.reduce((s, i) => s + resid[i], 0);
+  const sP = sL + sR;
+  const simL = sim(sL, L.length), simR = sim(sR, R.length), simP = sim(sP, idxs.length);
+  return {cand, L, R, sL, sR, sP, simL, simR, simP, gain: simL + simR - simP};
+}
+
+function scanAll(idxs, resid){
+  const res = [];
+  let total = 0;
+  for (const c of candidateSplits(idxs)){
+    total++;
+    const ev = evalSplit(c, idxs, resid);
+    if (ev) res.push(ev);
+  }
+  res.sort((a, b) => b.gain - a.gain);
+  return {ranked: res, totalCandidates: total};
+}
+
+function buildTree(idxs, resid, depth){
+  const sum = idxs.reduce((s, i) => s + resid[i], 0);
+  const node = {idxs, n: idxs.length, sum, sim: sim(sum, idxs.length)};
+  if (depth >= MAXDEPTH){ node.leaf = true; node.value = sum / (idxs.length + LAM); return node; }
+  const {ranked} = scanAll(idxs, resid);
+  if (!ranked.length || ranked[0].gain <= GAMMA){ node.leaf = true; node.value = sum / (idxs.length + LAM); return node; }
+  const best = ranked[0];
+  node.split = best;
+  node.left = buildTree(best.L, resid, depth + 1);
+  node.right = buildTree(best.R, resid, depth + 1);
+  return node;
+}
+function treeValue(node, row){
+  if (node.leaf) return node.value;
+  return treeValue(node.split.cand.test(row) ? node.left : node.right, row);
+}
+const rmseOf = preds => Math.sqrt(DATA.reduce((s, r, i) => s + (r.y - preds[i]) ** 2, 0) / N);
+
+/* ================= charts ================= */
+function drawIntroScatter(){
+  const svg = $('introScatter'); svg.innerHTML = '';
+  const W = 760, H = 420, m = {l: 52, r: 16, t: 14, b: 42};
+  const x = a => m.l + (a - 15) / (67 - 15) * (W - m.l - m.r);
+  const y = v => H - m.b - (v / 55) * (H - m.t - m.b);
+  for (let v = 0; v <= 50; v += 10){
+    svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === 0 ? 'zeroline' : 'gridline'}));
+    svg.appendChild(el('text', {x: m.l - 9, y: y(v) + 4, 'text-anchor': 'end', class: 'tick-label'}, '$' + v + 'k'));
+  }
+  for (let a = 20; a <= 60; a += 10)
+    svg.appendChild(el('text', {x: x(a), y: H - m.b + 20, 'text-anchor': 'middle', class: 'tick-label'}, a));
+  svg.appendChild(el('text', {x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', class: 'axis-label'}, 'Age (years)'));
+  svg.appendChild(el('text', {x: 14, y: m.t + 2, class: 'axis-label'}, 'Charges'));
+  DATA.forEach((r, i) => {
+    const d = personDot(x(r.age), y(r.y), 0, r, 6);
+    d.style.cursor = 'default';
+    bindTip(d, personTip(i));
+    svg.appendChild(d);
+  });
+}
+
+/* residual strip with simple stacking */
+function drawStrip(svgId, resid){
+  const svg = $(svgId); svg.innerHTML = '';
+  const W = 760, H = 190, m = {l: 16, r: 16, t: 30, b: 40};
+  const LO = -16, HI = 40;
+  const x = v => m.l + (v - LO) / (HI - LO) * (W - m.l - m.r);
+  const baseY = H - m.b - 8;
+  for (let v = -10; v <= 40; v += 10){
+    svg.appendChild(el('line', {x1: x(v), x2: x(v), y1: m.t, y2: H - m.b, class: v === 0 ? 'zeroline' : 'gridline'}));
+    svg.appendChild(el('text', {x: x(v), y: H - m.b + 18, 'text-anchor': 'middle', class: 'tick-label'}, (v > 0 ? '+' : '') + v));
+  }
+  svg.appendChild(el('text', {x: x(0) - 8, y: m.t - 8, 'text-anchor': 'end', class: 'axis-label'}, '← model too high'));
+  svg.appendChild(el('text', {x: x(0) + 8, y: m.t - 8, class: 'axis-label'}, 'model too low (under-charging) →'));
+  svg.appendChild(el('text', {x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', class: 'axis-label'}, 'Residual = actual − predicted ($1,000s)'));
+  const order = ALL.slice().sort((a, b) => resid[a] - resid[b]);
+  const placed = [];
+  for (const i of order){
+    const px = x(resid[i]);
+    let lvl = 0;
+    while (placed.some(p => p.lvl === lvl && Math.abs(p.px - px) < 13)) lvl++;
+    placed.push({px, lvl});
+    const d = personDot(px, baseY - lvl * 14, 0, DATA[i], 5.5);
+    bindTip(d, personTip(i, `Residual: <b>${fmtS(resid[i])}</b> ($1,000s)`));
+    svg.appendChild(d);
+  }
+}
+
+function drawLoss(hist){
+  const svg = $('lossChart'); svg.innerHTML = '';
+  const W = 520, H = 300, m = {l: 44, r: 20, t: 16, b: 40};
+  const x = r => m.l + r / MAXROUND * (W - m.l - m.r);
+  const y = v => H - m.b - v / 12 * (H - m.t - m.b);
+  for (let v = 0; v <= 12; v += 3){
+    svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === 0 ? 'zeroline' : 'gridline'}));
+    svg.appendChild(el('text', {x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'tick-label'}, v));
+  }
+  for (let r = 0; r <= MAXROUND; r++)
+    svg.appendChild(el('text', {x: x(r), y: H - m.b + 18, 'text-anchor': 'middle', class: 'tick-label'}, r));
+  svg.appendChild(el('text', {x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', class: 'axis-label'}, 'Boosting round'));
+  if (hist.length > 1){
+    const pts = hist.map((v, r) => `${x(r)},${y(v)}`).join(' ');
+    svg.appendChild(el('polyline', {points: pts, fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round'}));
+  }
+  hist.forEach((v, r) => {
+    const last = r === hist.length - 1;
+    const c = el('circle', {cx: x(r), cy: y(v), r: last ? 6 : 4, fill: 'var(--accent)', stroke: 'var(--surface)', 'stroke-width': 1.5});
+    bindTip(c, `<div class="tt-title">Round ${r}</div>Typical miss: <b>$${v.toFixed(2)}k</b>`);
+    svg.appendChild(c);
+    if (last) svg.appendChild(el('text', {x: x(r), y: y(v) - 12, 'text-anchor': r === 0 ? 'start' : 'middle', class: 'tick-label', 'font-weight': 700, fill: 'var(--ink)'}, '$' + v.toFixed(1) + 'k'));
+  });
+}
+
+function drawPA(preds){
+  const svg = $('paChart'); svg.innerHTML = '';
+  const W = 520, H = 300, m = {l: 46, r: 18, t: 14, b: 40};
+  const x = v => m.l + v / 55 * (W - m.l - m.r);
+  const y = v => H - m.b - v / 55 * (H - m.t - m.b);
+  for (let v = 0; v <= 50; v += 10){
+    svg.appendChild(el('line', {x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: 'gridline'}));
+    svg.appendChild(el('text', {x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'tick-label'}, v));
+    if (v > 0) svg.appendChild(el('text', {x: x(v), y: H - m.b + 18, 'text-anchor': 'middle', class: 'tick-label'}, v));
+  }
+  svg.appendChild(el('line', {x1: x(0), y1: y(0), x2: x(55), y2: y(55), stroke: 'var(--baseline)', 'stroke-width': 1.5, 'stroke-dasharray': '5 4'}));
+  svg.appendChild(el('text', {x: (m.l + W - m.r) / 2, y: H - 6, 'text-anchor': 'middle', class: 'axis-label'}, 'Actual charges ($1,000s)'));
+  svg.appendChild(el('text', {x: 12, y: m.t + 2, class: 'axis-label'}, 'Predicted'));
+  DATA.forEach((r, i) => {
+    const d = personDot(x(r.y), y(Math.max(0, Math.min(55, preds[i]))), 0, r, 5.5);
+    bindTip(d, personTip(i, `Predicted: <b>${money(preds[i])}</b>`));
+    svg.appendChild(d);
+  });
+}
+
+/* tree diagram */
+function drawTree(tree){
+  const svg = $('treeSvg'); svg.innerHTML = '';
+  const W = 960;
+  const leaves = [];
+  (function collect(n){ if (n.leaf) leaves.push(n); else { collect(n.left); collect(n.right); } })(tree);
+  let col = 0;
+  (function assignX(n){
+    if (n.leaf){ n.x = (col + .5) * (W / leaves.length); col++; }
+    else { assignX(n.left); assignX(n.right); n.x = (n.left.x + n.right.x) / 2; }
+  })(tree);
+  const rowY = [58, 185, 315];
+  (function assignY(n, d){ n.y = rowY[d]; if (!n.leaf){ assignY(n.left, d + 1); assignY(n.right, d + 1); } })(tree, 0);
+
+  (function edges(n){
+    if (n.leaf) return;
+    for (const [child, lab] of [[n.left, 'yes'], [n.right, 'no']]){
+      svg.appendChild(el('line', {x1: n.x, y1: n.y + 34, x2: child.x, y2: child.y - (child.leaf ? 30 : 34), stroke: 'var(--baseline)', 'stroke-width': 1.5}));
+      const mx = (n.x + child.x) / 2, my = (n.y + child.y) / 2 + 2;
+      svg.appendChild(el('text', {x: mx + (child === n.left ? -10 : 10), y: my, 'text-anchor': child === n.left ? 'end' : 'start', 'font-size': 12, fill: 'var(--ink-3)', 'font-family': 'var(--sans)'}, lab));
+      edges(child);
+    }
+  })(tree);
+
+  (function boxes(n, isRoot){
+    const w = n.leaf ? 190 : 235, h = n.leaf ? 60 : 68;
+    const g = el('g', {});
+    const rect = el('rect', {x: n.x - w / 2, y: n.y - h / 2, width: w, height: h, rx: 10,
+      fill: n.leaf ? 'var(--accent-soft)' : 'var(--surface)',
+      stroke: n.leaf ? 'var(--accent)' : (isRoot ? 'var(--gold)' : 'var(--border)'),
+      'stroke-width': isRoot ? 2.5 : 1.5});
+    g.appendChild(rect);
+    if (n.leaf){
+      g.appendChild(el('text', {x: n.x, y: n.y - 6, 'text-anchor': 'middle', 'font-size': 15, 'font-weight': 700, fill: 'var(--accent-ink)'},
+        'leaf: ' + fmtS(n.value, 2)));
+      g.appendChild(el('text', {x: n.x, y: n.y + 16, 'text-anchor': 'middle', 'font-size': 11.5, fill: 'var(--ink-2)'},
+        `= ${fmt(n.sum)} ÷ (${n.n}+${LAM})`));
+    } else {
+      g.appendChild(el('text', {x: n.x, y: n.y - 10, 'text-anchor': 'middle', 'font-size': 14.5, 'font-weight': 700, fill: 'var(--ink)'}, n.split.cand.label));
+      g.appendChild(el('text', {x: n.x, y: n.y + 9, 'text-anchor': 'middle', 'font-size': 11.5, fill: 'var(--ink-2)'},
+        `n=${n.n} · Σr=${fmt(n.sum)} · sim=${fmt(n.sim, 0)}`));
+      g.appendChild(el('text', {x: n.x, y: n.y + 25, 'text-anchor': 'middle', 'font-size': 11.5, fill: 'var(--gold)', 'font-weight': 700},
+        'gain = ' + fmt(n.split.gain, 0)));
+      boxes(n.left, false); boxes(n.right, false);
+    }
+    svg.appendChild(g);
+  })(tree, true);
+}
+
+/* ================= part 1: table + fills ================= */
+function buildDataTable(){
+  const t = $('dataTable');
+  t.innerHTML = '<thead><tr><th>#</th><th>Smoker</th><th>Age</th><th>Sex</th><th>BMI</th><th>Children</th><th>Region</th><th>Charges</th></tr></thead>';
+  const tb = document.createElement('tbody');
+  DATA.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    if (r.smoker) tr.className = 'smoker-row';
+    tr.innerHTML = `<td>#${i + 1}</td>` +
+      `<td><span class="pill ${r.smoker ? 'yes' : 'no'}">${r.smoker ? 'smoker' : 'non-smoker'}</span></td>` +
+      `<td class="num">${r.age}</td><td>${r.sex}</td><td class="num">${r.bmi.toFixed(1)}</td>` +
+      `<td class="num">${r.kids}</td><td>${REGION_NAMES[r.region]}</td><td class="money num">${money(r.y)}</td>`;
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+}
+
+/* ================= part 2: mode 1 ================= */
+const resid0 = DATA.map(r => r.y - MEAN);
+const rootScan = scanAll(ALL, resid0);
+const BEST0 = rootScan.ranked[0];
+
+const M1_FEATS = [
+  {key: 'smoker', name: 'Smoker'},
+  {key: 'age', name: 'Age'},
+  {key: 'bmi', name: 'BMI'},
+  {key: 'kids', name: 'Children'},
+  {key: 'sex', name: 'Sex'},
+  {key: 'region', name: 'Region'},
+];
+let m1Feat = 'age';
+let m1Cands = [];     /* candidates for current feature */
+let m1Pick = 0;
+let attempts = [];
+let revealed = false;
+
+function featCandidates(key){
+  return candidateSplits(ALL).filter(c => c.feat === key)
+    .filter(c => evalSplit(c, ALL, resid0) !== null);
+}
+function renderChips(){
+  const box = $('featChips'); box.innerHTML = '';
+  for (const f of M1_FEATS){
+    const b = document.createElement('button');
+    b.className = 'chip' + (f.key === m1Feat ? ' on' : '');
+    b.textContent = f.name;
+    b.addEventListener('click', () => { m1Feat = f.key; m1Pick = 0; renderChips(); renderThr(); });
+    box.appendChild(b);
+  }
+}
+function renderThr(){
+  m1Cands = featCandidates(m1Feat);
+  const box = $('thrBox'); box.innerHTML = '';
+  if (!m1Cands.length){ box.innerHTML = '<p class="hint">No valid split available for this feature on this sample.</p>'; return; }
+  if (m1Cands.length === 1){
+    m1Pick = 0;
+    box.innerHTML = `<label>Your question</label><div class="thr-readout">${m1Cands[0].label}</div>`;
+    return;
+  }
+  if (m1Feat === 'region'){
+    const l = document.createElement('label'); l.textContent = 'Your question'; box.appendChild(l);
+    const row = document.createElement('div'); row.className = 'chip-row'; row.style.margin = '4px 0 0';
+    m1Cands.forEach((c, i) => {
+      const b = document.createElement('button');
+      b.className = 'chip' + (i === m1Pick ? ' on' : '');
+      b.textContent = c.label.replace('region = ', '').replace('?', '');
+      b.addEventListener('click', () => { m1Pick = i; renderThr(); });
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+    return;
+  }
+  m1Pick = Math.min(m1Pick, m1Cands.length - 1) || Math.floor(m1Cands.length / 2);
+  const l = document.createElement('label');
+  l.textContent = 'Slide to set the cut-off (every stop is a real boundary between two customers)';
+  l.setAttribute('for', 'thrRange');
+  box.appendChild(l);
+  const inp = document.createElement('input');
+  inp.type = 'range'; inp.min = 0; inp.max = m1Cands.length - 1; inp.value = m1Pick; inp.id = 'thrRange';
+  const ro = document.createElement('div'); ro.className = 'thr-readout';
+  ro.textContent = m1Cands[m1Pick].label;
+  inp.addEventListener('input', () => { m1Pick = +inp.value; ro.textContent = m1Cands[m1Pick].label; });
+  box.appendChild(inp); box.appendChild(ro);
+}
+
+function mathSim(elId, name, sumR, n, colorResult){
+  $(elId).innerHTML =
+    `<span class="lbl">${name}</span>` +
+    `Similarity <span class="op">=</span>` +
+    `<span class="frac"><span class="top">(sum of residuals)²</span><span class="bot">size + λ</span></span>` +
+    `<span class="op">=</span>` +
+    `<span class="frac"><span class="top">(${fmt(sumR)})²</span><span class="bot">${n} + ${LAM}</span></span>` +
+    `<span class="op">=</span>` +
+    `<span class="frac"><span class="top">${fmt(sumR * sumR)}</span><span class="bot">${n + LAM}</span></span>` +
+    `<span class="op">=</span> <span class="${colorResult ? 'result' : ''}">${fmt(sim(sumR, n))}</span>`;
+}
+
+function runMode1(){
+  if (!m1Cands.length) return;
+  const cand = m1Cands[m1Pick];
+  const ev = evalSplit(cand, ALL, resid0);
+  if (!ev) return;
+  $('walkthrough').hidden = false;
+  $('wtTitle').textContent = 'Walkthrough: "' + cand.label + '"';
+
+  $('bLeftHead').textContent = `YES — ${cand.label} (${ev.L.length} people)`;
+  $('bRightHead').textContent = `NO (${ev.R.length} people)`;
+  for (const [side, idxs, sum] of [['bLeft', ev.L, ev.sL], ['bRight', ev.R, ev.sR]]){
+    const chips = $(side + 'Chips'); chips.innerHTML = '';
+    for (const i of idxs.slice().sort((a, b) => resid0[b] - resid0[a])){
+      const s = document.createElement('span');
+      s.className = 'rchip ' + (resid0[i] >= 0 ? 'p' : 'n');
+      s.textContent = fmtS(resid0[i]);
+      bindTip(s, personTip(i, `Residual: <b>${fmtS(resid0[i])}</b>`));
+      chips.appendChild(s);
+    }
+    $(side + 'Sum').innerHTML = `sum of residuals <b>Σr = ${fmt(sum)}</b>`;
+  }
+
+  mathSim('mathLeft', `YES group (${ev.L.length} people)`, ev.sL, ev.L.length, false);
+  mathSim('mathRight', `NO group (${ev.R.length} people)`, ev.sR, ev.R.length, false);
+  mathSim('mathParent', `Whole room before splitting (${N} people) — residuals sum to ${fmt(ev.sP)}, so there is almost nothing to score`, ev.sP, N, false);
+
+  $('mathGain').innerHTML =
+    `<span class="lbl">Gain = what the split creates out of nothing</span>` +
+    `Gain <span class="op">=</span> ${fmt(ev.simL)} <span class="op">+</span> ${fmt(ev.simR)} <span class="op">−</span> ${fmt(ev.simP)}` +
+    `<span class="op">=</span> <span class="result">${fmt(ev.gain)}</span>`;
+  $('gainNum').textContent = fmt(ev.gain, 0);
+  const isBestPossible = Math.abs(ev.gain - BEST0.gain) < 1e-9;
+  $('gainCap').innerHTML = isBestPossible
+    ? '<b>That is the single best split in the entire dataset.</b> You just did, by intuition, what XGBoost does by brute force.'
+    : (attempts.length && ev.gain > Math.max(...attempts.map(a => a.gain))
+      ? '<b>New personal best.</b> Is there a question that separates the residuals even more cleanly?'
+      : 'Higher gain = the two groups explain more of the error. Try another feature or cut-off and compare.');
+
+  const vL = ev.sL / (ev.L.length + LAM), vR = ev.sR / (ev.R.length + LAM);
+  $('mathLeaves').innerHTML =
+    `<span class="lbl">Corrections (before the learning rate is applied)</span>` +
+    `YES leaf <span class="op">=</span> ${fmt(ev.sL)} ÷ ${ev.L.length + LAM} <span class="op">=</span> <span class="result">${fmtS(vL, 2)}</span>` +
+    `<span class="op" style="margin:0 18px">·</span>` +
+    `NO leaf <span class="op">=</span> ${fmt(ev.sR)} ÷ ${ev.R.length + LAM} <span class="op">=</span> <span class="result">${fmtS(vR, 2)}</span>`;
+
+  if (!attempts.some(a => a.label === cand.label)) attempts.push({label: cand.label, gain: ev.gain});
+  renderLeaderboard();
+  $('walkthrough').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+function renderLeaderboard(){
+  const rows = attempts.slice().sort((a, b) => b.gain - a.gain);
+  const tb = $('lbBody'); tb.innerHTML = '';
+  const shown = revealed ? [{label: BEST0.cand.label + ' — best of all ' + rootScan.totalCandidates + ' candidates', gain: BEST0.gain, xgb: true}, ...rows] : rows;
+  shown.sort((a, b) => b.gain - a.gain);
+  shown.forEach((a, i) => {
+    const tr = document.createElement('tr');
+    if (i === 0 && revealed) tr.className = 'best';
+    tr.innerHTML = `<td class="num">${i + 1}</td><td>${a.label}</td><td class="g num">${fmt(a.gain, 0)}</td>` +
+      `<td><span class="who ${a.xgb ? 'xgb' : 'you'}">${a.xgb ? 'XGBoost' : 'you'}</span></td>`;
+    tb.appendChild(tr);
+  });
+  const bestUser = rows.length ? rows[0].gain : 0;
+  const pct = Math.max(0, Math.min(100, bestUser / BEST0.gain * 100));
+  $('userBarFill').style.width = pct + '%';
+  $('userBarCap').textContent = revealed
+    ? `Your best gain reaches ${pct.toFixed(0)}% of the best possible (${fmt(BEST0.gain, 0)}).`
+    : `Your best gain so far: ${rows.length ? fmt(bestUser, 0) : '—'}. The best possible gain is hidden — keep trying, then reveal it.`;
+}
+
+function reveal(){
+  revealed = true;
+  renderLeaderboard();
+  const note = $('revealNote');
+  note.hidden = false;
+  note.innerHTML = `XGBoost doesn't guess and doesn't get tired: it evaluated <b>all ${rootScan.totalCandidates} candidate splits</b> ` +
+    `(every boundary between neighbouring values of every feature) and the winner is <b>"${BEST0.cand.label}"</b> with a gain of <b>${fmt(BEST0.gain, 0)}</b>. ` +
+    `That exhaustive scan is Part 03.`;
+}
+
+/* ================= part 3: mode 2 ================= */
+const S = {
+  round: 1,
+  stage: 'scan',            /* scan -> grow -> apply -> next */
+  preds: DATA.map(() => MEAN),
+  rmseHist: [],
+  scanned: 0,
+  tree: null,
+  scan: null,
+  trackerRows: [13, 9],     /* customer #14 (smoker) and #10 (non-smoker) */
+  trackerHist: [],          /* per applied round: {round, leaf:{i:val}} */
+};
+S.rmseHist.push(rmseOf(S.preds));
+
+function residNow(){ return DATA.map((r, i) => r.y - S.preds[i]); }
+
+function setButtons(){
+  const done = S.round > MAXROUND;
+  $('btnScan').disabled = done || S.stage !== 'scan';
+  $('btnGrow').disabled = done || S.stage !== 'grow';
+  $('btnApply').disabled = done || S.stage !== 'apply';
+  $('btnNext').disabled = done || S.stage !== 'next';
+  $('btnFF').disabled = done;
+}
+function refreshStats(){
+  const rmse = S.rmseHist[S.rmseHist.length - 1];
+  $('statRound').textContent = Math.min(S.round, MAXROUND);
+  $('statRmse').textContent = '$' + rmse.toFixed(2) + 'k';
+  const impPct = (1 - rmse / S.rmseHist[0]) * 100;
+  $('statImp').textContent = impPct < 0.5 ? '0%' : '−' + impPct.toFixed(0) + '%';
+  $('statScanned').textContent = S.scanned;
+  drawLoss(S.rmseHist);
+  drawPA(S.preds);
+  drawStrip('residStripR', residNow());
+  renderTracker();
+  setButtons();
+}
+
+function doScan(){
+  const resid = residNow();
+  S.scan = scanAll(ALL, resid);
+  S.scanned += S.scan.totalCandidates;
+  const t = $('scanTable');
+  t.innerHTML = '<thead><tr><th>Rank</th><th>Candidate split</th><th>Σr yes</th><th>Σr no</th><th>Sim yes</th><th>Sim no</th><th>Gain</th></tr></thead>';
+  const tb = document.createElement('tbody');
+  const top = S.scan.ranked.slice(0, 8);
+  top.forEach((ev, i) => {
+    const tr = document.createElement('tr');
+    if (i === 0) tr.className = 'winner';
+    tr.innerHTML = `<td class="num">${i + 1}</td><td style="text-align:left">${ev.cand.label}${i === 0 ? ' 🏆' : ''}</td>` +
+      `<td class="num">${fmt(ev.sL)}</td><td class="num">${fmt(ev.sR)}</td>` +
+      `<td class="num">${fmt(ev.simL, 0)}</td><td class="num">${fmt(ev.simR, 0)}</td>` +
+      `<td class="num" style="font-weight:700">${fmt(ev.gain, 0)}</td>`;
+    tb.appendChild(tr);
+  });
+  t.appendChild(tb);
+  $('scanNote').innerHTML = `XGBoost scored <b>all ${S.scan.totalCandidates} candidate splits</b> against the current residuals — same algebra you did in Part 02, ` +
+    `applied without mercy. Top 8 shown; the winner becomes the root of this round's tree.`;
+  $('scanPanel').hidden = false;
+  $('treePanel').hidden = true;
+  $('applyPanel').hidden = true;
+  $('roundState').textContent = 'Scan complete. Now grow the tree inside each branch.';
+  S.stage = 'grow';
+  setButtons();
+}
+
+function doGrow(){
+  S.tree = buildTree(ALL, residNow(), 0);
+  drawTree(S.tree);
+  $('treePanel').hidden = false;
+  $('roundState').textContent = 'Tree grown. Apply it — gently.';
+  S.stage = 'apply';
+  setButtons();
+}
+
+function doApply(){
+  const leafRecord = {};
+  const before = rmseOf(S.preds);
+  DATA.forEach((r, i) => {
+    const v = treeValue(S.tree, r);
+    if (S.trackerRows.includes(i)) leafRecord[i] = v;
+    S.preds[i] += ETA * v;
+  });
+  const after = rmseOf(S.preds);
+  S.rmseHist.push(after);
+  S.trackerHist.push({round: S.round, leaf: leafRecord});
+  $('applyPanel').hidden = false;
+  $('applyNote').innerHTML =
+    `Each person's prediction moved <b>η = ${ETA}</b> (30%) of the way toward their leaf's correction: ` +
+    `<span class="mono">new prediction = old + ${ETA} × leaf value</span>. ` +
+    `Typical miss: <b>$${before.toFixed(2)}k → $${after.toFixed(2)}k</b>. ` +
+    (S.round < MAXROUND
+      ? `The remaining error becomes the <em>next</em> round's target — that hand-off is the "boosting" in gradient boosting.`
+      : `That was the last round.`);
+  $('roundState').textContent = S.round < MAXROUND ? 'Predictions updated. Ready for the next round.' : 'Done — six trees, one model.';
+  S.stage = 'next';
+  if (S.round >= MAXROUND){ S.round = MAXROUND + 1; finishBanner(); }
+  refreshStats();
+}
+
+function doNext(){
+  S.round++;
+  $('roundBadge').textContent = 'Round ' + S.round;
+  $('scanPanel').hidden = true;
+  $('treePanel').hidden = true;
+  $('applyPanel').hidden = true;
+  $('roundState').textContent = 'New residuals below — smaller, but not zero. Scan again.';
+  S.stage = 'scan';
+  refreshStats();
+}
+
+function fastForward(){
+  while (S.round <= MAXROUND){
+    if (S.stage === 'scan') doScan();
+    else if (S.stage === 'grow') doGrow();
+    else if (S.stage === 'apply') doApply();
+    else if (S.stage === 'next') doNext();
+  }
+  refreshStats();
+}
+
+function resetMode2(){
+  S.round = 1;
+  S.stage = 'scan';
+  S.preds = DATA.map(() => MEAN);
+  S.rmseHist = [rmseOf(S.preds)];
+  S.scanned = 0;
+  S.tree = null;
+  S.scan = null;
+  S.trackerHist = [];
+  $('scanPanel').hidden = true;
+  $('treePanel').hidden = true;
+  $('applyPanel').hidden = true;
+  $('roundBadge').textContent = 'Round 1';
+  $('roundState').textContent = 'The residuals below are what’s left to explain.';
+  refreshStats();
+}
+
+function finishBanner(){
+  $('roundBadge').textContent = 'Done';
+  const start = S.rmseHist[0], end = S.rmseHist[S.rmseHist.length - 1];
+  $('roundState').innerHTML = `<b>Final model = base + η·(tree 1 + tree 2 + … + tree 6).</b> ` +
+    `Typical miss fell from $${start.toFixed(1)}k to $${end.toFixed(1)}k — a ${((1 - end / start) * 100).toFixed(0)}% improvement. ` +
+    `In practice you'd keep going (hundreds of trees) and stop when a <em>held-out</em> dataset stops improving.`;
+}
+
+function renderTracker(){
+  const t = $('trackerTable');
+  let head = '<thead><tr><th>Customer</th><th>Actual</th><th>Base</th>';
+  for (let r = 1; r <= MAXROUND; r++) head += `<th>+ tree ${r}</th>`;
+  head += '<th>Prediction now</th></tr></thead>';
+  t.innerHTML = head;
+  const tb = document.createElement('tbody');
+  for (const i of S.trackerRows){
+    const r = DATA[i];
+    let run = MEAN;
+    let cells = `<td>#${i + 1} — ${r.age}${r.sex} · BMI ${r.bmi.toFixed(1)} · <span class="pill ${r.smoker ? 'yes' : 'no'}">${r.smoker ? 'smoker' : 'non-smoker'}</span></td>` +
+      `<td class="money num">${money(r.y)}</td><td class="num">${fmt(MEAN)}</td>`;
+    for (let round = 1; round <= MAXROUND; round++){
+      const h = S.trackerHist.find(x => x.round === round);
+      if (h){ run += ETA * h.leaf[i]; cells += `<td class="num">${fmtS(ETA * h.leaf[i])}</td>`; }
+      else cells += '<td class="num" style="color:var(--ink-3)">·</td>';
+    }
+    cells += `<td class="money num" style="font-weight:700">${money(run)}</td>`;
+    const tr = document.createElement('tr');
+    if (r.smoker) tr.className = 'smoker-row';
+    tr.innerHTML = cells;
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+}
+
+/* ================= part 4 ================= */
+function buildTakeaways(){
+  /* live numbers for the cards */
+  const soloR = Math.max(...resid0.map(Math.abs));
+  const simSolo0 = (soloR * soloR) / 1;
+  const simSolo1 = (soloR * soloR) / 2;
+  const t1 = buildTree(ALL, resid0, 0);
+  const rootLabel = t1.split ? t1.split.cand.label : '—';
+  const childLabel = t1.left && t1.left.split ? t1.left.split.cand.label : (t1.right && t1.right.split ? t1.right.split.cand.label : '—');
+  const totalScans = rootScan.totalCandidates;
+  const cards = [
+    {n: '01', h: 'It learns from its mistakes', p: [
+      `Each tree is trained on the <b>residuals</b> — the errors — of everything before it. Tree 1 handles the big story (${rootLabel.replace('?', '')}); tree 2 works on whatever tree 1 got wrong; tree 3 cleans up after both.`,
+      `That division of labour is why a stack of small, weak trees beats one big clever one: every new tree gets a fresh, focused job.`]},
+    {n: '02', h: 'It never guesses', p: [
+      `In Part 02 you tested a handful of splits. XGBoost scored <b>all ${totalScans} of them</b>, every round, at every node, and provably kept the best. Gain isn't a heuristic — it's exactly how much error the split removes.`,
+      `At business scale (millions of rows) it uses clever histograms to do this fast — same logic, industrial engineering.`]},
+    {n: '03', h: 'Built-in skepticism (λ and γ)', p: [
+      `The λ in every denominator shrinks the score of small groups. The most extreme customer alone has residual ${fmt(soloR)}:`,
+      `A lone data point loses ${(100 * (1 - simSolo1 / simSolo0)).toFixed(0)}% of its influence, a group of 20 barely notices. λ makes outliers whisper and patterns shout — that's regularization, and it's <em>inside</em> the formula, not bolted on. A second dial, γ, deletes any split whose gain can't clear a minimum bar.`],
+      math: `sim (λ=0) = ${fmt(soloR)}² ÷ 1 = ${fmt(simSolo0, 0)} &nbsp;&nbsp;→&nbsp;&nbsp; sim (λ=1) = ${fmt(soloR)}² ÷ 2 = ${fmt(simSolo1, 0)}`},
+    {n: '04', h: 'Small steps beat big leaps', p: [
+      `Every correction was multiplied by <b>η = 0.3</b> before it touched a prediction. Why give up 70% of the fix? Because a full step lets one tree over-commit to noise; many small steps let later trees veto earlier mistakes.`,
+      `It's dollar-cost averaging for models: slower per round, far more reliable at the end.`]},
+    {n: '05', h: 'It finds interactions by itself', p: [
+      `Round 1's tree split on <b>${rootLabel.replace('?', '')}</b>, then split that branch again on <b>${childLabel}</b>. Nobody told it that ${childLabel.split(' ')[0]} matters <em>differently</em> for that group — the gain math discovered the interaction.`,
+      `A linear model needs you to hand-build terms like that. Trees find them automatically, which is why XGBoost thrives on messy business data: churn, credit, fraud, pricing.`]},
+  ];
+  const grid = $('takeGrid'); grid.innerHTML = '';
+  for (const c of cards){
+    const d = document.createElement('div');
+    d.className = 'take';
+    d.innerHTML = `<div class="t-num">${c.n}</div><h3>${c.h}</h3>` + c.p.map((x, i) =>
+      `<p>${x}</p>` + (i === 0 && c.math ? `<div class="mini-math">${c.math}</div>` : '')).join('');
+    grid.appendChild(d);
+  }
+  $('teacherNote').innerHTML =
+    `<strong>For the whiteboard (instructor notes):</strong> this page runs real XGBoost math for squared-error regression: ` +
+    `similarity = (Σ residuals)² ÷ (n + λ) with λ = 1, gain = sim<sub>L</sub> + sim<sub>R</sub> − sim<sub>parent</sub>, γ = 0, ` +
+    `leaf value = Σ residuals ÷ (n + λ), learning rate η = 0.3, tree depth 2, minimum ${MINLEAF} people per leaf, ${MAXROUND} boosting rounds, base prediction = the mean (${fmt(MEAN)}). ` +
+    `For other objectives (e.g. classification) XGBoost swaps residuals for "gradient statistics", but the structure of every formula — and everything your students just did — stays identical.`;
+}
+
+/* ================= nav highlight ================= */
+function navSpy(){
+  const links = [...document.querySelectorAll('.topnav nav a')];
+  const secs = links.map(a => document.querySelector(a.getAttribute('href')));
+  const obs = new IntersectionObserver(es => {
+    for (const e of es) if (e.isIntersecting){
+      links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + e.target.id));
+    }
+  }, {rootMargin: '-25% 0px -65% 0px'});
+  secs.forEach(s => s && obs.observe(s));
+}
+
+/* ================= boot ================= */
+document.querySelectorAll('[data-fill="mean1"]').forEach(e => e.textContent = fmt(MEAN));
+document.querySelectorAll('[data-fill="ncand"]').forEach(e => e.textContent = rootScan.totalCandidates);
+buildDataTable();
+drawIntroScatter();
+drawStrip('residStrip0', resid0);
+renderChips();
+renderThr();
+$('runSplit').addEventListener('click', runMode1);
+$('revealBtn').addEventListener('click', reveal);
+$('btnScan').addEventListener('click', doScan);
+$('btnGrow').addEventListener('click', doGrow);
+$('btnApply').addEventListener('click', doApply);
+$('btnNext').addEventListener('click', doNext);
+$('btnFF').addEventListener('click', fastForward);
+$('btnReset').addEventListener('click', resetMode2);
+$('roundBadge').textContent = 'Round 1';
+refreshStats();
+buildTakeaways();
+navSpy();
+</script>
+
+</html>
